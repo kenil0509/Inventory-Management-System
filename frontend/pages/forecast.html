@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Demand Forecast — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+<style>
+.forecast-card { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); padding:18px 20px; transition:var(--transition); }
+.forecast-card:hover { box-shadow:var(--shadow); }
+.forecast-card.critical { border-left:3px solid var(--danger); }
+.forecast-card.reorder  { border-left:3px solid var(--warning); }
+.forecast-card.healthy  { border-left:3px solid var(--success); }
+.forecast-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
+.days-pill { padding:4px 12px; border-radius:20px; font-size:12px; font-weight:700; }
+.days-pill.critical { background:#FEF2F2; color:var(--danger); }
+.days-pill.reorder  { background:#FFFBEB; color:var(--warning); }
+.days-pill.healthy  { background:#ECFDF5; color:var(--success); }
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Demand Forecast</span><span class="topbar-sub">— Reorder suggestions</span></div>
+    <div class="topbar-right">
+      <select class="form-control-custom" id="filterStatus" onchange="filterForecast()" style="width:160px">
+        <option value="">All Items</option>
+        <option value="critical">🚨 Critical</option>
+        <option value="reorder">⚠️ Reorder Now</option>
+        <option value="healthy">✅ Healthy</option>
+      </select>
+      <button class="btn-secondary-custom btn-sm" onclick="loadForecast()">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div style="background:linear-gradient(135deg,#EFF6FF,#F0FDF4);border:1px solid #BFDBFE;border-radius:var(--radius);padding:16px 20px;margin-bottom:22px;display:flex;align-items:flex-start;gap:12px">
+      <span style="font-size:20px">🔮</span>
+      <div>
+        <div style="font-weight:700;margin-bottom:4px">About Demand Forecasting</div>
+        <div style="font-size:13px;color:var(--text-secondary)">
+          Forecasts are calculated from delivered sales orders over 30 days. <strong>Days of Stock</strong> = current qty ÷ avg daily demand.
+          Items below their reorder point are flagged with suggested order quantities to reach max stock.
+        </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:22px" id="forecastStats"></div>
+    <div class="forecast-grid" id="forecastGrid">
+      <div class="page-loader"><div class="spinner"></div></div>
+    </div>
+  </div>
+</div>
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+
+let allForecast = [];
+
+async function loadForecast() {
+  allForecast = await get('/reports/demand-forecast') || [];
+  const critical = allForecast.filter(f => f.status === 'critical').length;
+  const reorder  = allForecast.filter(f => f.status === 'reorder').length;
+  const healthy  = allForecast.filter(f => f.status === 'healthy').length;
+  document.getElementById('forecastStats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon red">🚨</div><div><div class="stat-value" style="color:var(--danger)">${critical}</div><div class="stat-label">Out of Stock</div></div></div>
+    <div class="stat-card"><div class="stat-icon amber">⚠️</div><div><div class="stat-value" style="color:var(--warning)">${reorder}</div><div class="stat-label">Need Reorder</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">✅</div><div><div class="stat-value" style="color:var(--success)">${healthy}</div><div class="stat-label">Healthy Stock</div></div></div>`;
+  filterForecast();
+}
+
+function filterForecast() {
+  const filter = document.getElementById('filterStatus').value;
+  const list = filter ? allForecast.filter(f => f.status === filter) : allForecast;
+  const grid = document.getElementById('forecastGrid');
+  if (!list.length) { grid.innerHTML = '<div class="empty-state"><div class="empty-icon">🔮</div><p>No items match the filter</p></div>'; return; }
+  grid.innerHTML = list.map(f => {
+    const daysColor = f.days_of_stock <= 7 ? 'var(--danger)' : f.days_of_stock <= 30 ? 'var(--warning)' : 'var(--success)';
+    const pct = Math.min(100, Math.round((f.current_stock / (f.reorder_point * 5 || 50)) * 100));
+    return `<div class="forecast-card ${f.status}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">
+        <div>
+          <div style="font-weight:700;font-size:14px">${f.name}</div>
+          <div style="font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${f.sku}</div>
+        </div>
+        <span class="days-pill ${f.status}">${f.days_of_stock >= 365 ? '365+' : f.days_of_stock} days left</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;font-size:12px">
+        <div><div style="color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px;font-size:10px">Current Stock</div>
+          <div style="font-weight:800;font-size:16px;color:${daysColor}">${f.current_stock}</div></div>
+        <div><div style="color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px;font-size:10px">Reorder At</div>
+          <div style="font-weight:700;font-size:14px">${f.reorder_point}</div></div>
+        <div><div style="color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px;font-size:10px">Avg Daily</div>
+          <div style="font-weight:700;font-size:14px">${f.avg_daily_demand}</div></div>
+      </div>
+      <div class="stock-bar-bg" style="margin-bottom:10px">
+        <div class="stock-bar-fill" style="width:${pct}%;background:${f.current_stock===0?'var(--danger)':f.status==='reorder'?'var(--warning)':'var(--success)'}"></div>
+      </div>
+      ${f.reorder_needed ? `
+      <div style="background:var(--surface);border:1px dashed var(--border);border-radius:8px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:10px;font-weight:600;text-transform:uppercase;color:var(--text-muted)">Suggested Order</div>
+          <div style="font-weight:800;font-size:16px;color:var(--primary)">${f.suggested_order_qty} units</div>
+        </div>
+        <button class="btn-primary-custom btn-sm" onclick="createPOForProduct(${f.product_id}, '${f.name}', ${f.suggested_order_qty})">🛒 Create PO</button>
+      </div>` : `<div style="color:var(--success);font-size:12.5px;font-weight:600">✓ Stock level is healthy — no action needed</div>`}
+    </div>`;
+  }).join('');
+}
+
+function createPOForProduct(productId, productName, qty) {
+  toast(`💡 Go to Purchase Orders and add ${qty} units of "${productName}"`, 'warning', 5000);
+  setTimeout(() => window.location.href = 'purchase-orders.html', 1500);
+}
+
+loadForecast();
+</script>
+</body>
+</html>

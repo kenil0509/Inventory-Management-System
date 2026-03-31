@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap: 18px; margin-bottom: 26px; }
+.charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 26px; }
+.recent-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media(max-width:900px){ .charts-grid,.recent-grid { grid-template-columns:1fr; } }
+canvas { max-height: 240px; }
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div>
+      <span class="topbar-title">Dashboard</span>
+      <span class="topbar-sub">— Overview</span>
+    </div>
+    <div class="topbar-right">
+      <span id="date-label" style="font-size:13px;color:var(--text-muted)"></span>
+      <button class="btn-secondary-custom btn-sm" onclick="loadAll()">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <!-- Stats -->
+    <div class="stats-grid" id="stats-grid">
+      <div class="page-loader"><div class="spinner"></div></div>
+    </div>
+    <!-- Charts -->
+    <div class="charts-grid">
+      <div class="card">
+        <div class="card-header-custom"><span class="card-title">Stock by Category</span></div>
+        <div class="card-body-custom"><canvas id="categoryChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-header-custom"><span class="card-title">Order Status Overview</span></div>
+        <div class="card-body-custom"><canvas id="orderChart"></canvas></div>
+      </div>
+    </div>
+    <!-- Recent -->
+    <div class="recent-grid">
+      <div class="card">
+        <div class="card-header-custom">
+          <span class="card-title">Recent Stock Movements</span>
+          <a href="movements.html" style="font-size:12.5px;color:var(--primary);text-decoration:none">View all →</a>
+        </div>
+        <div id="movements-list"><div class="page-loader"><div class="spinner"></div></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header-custom">
+          <span class="card-title">Active Alerts</span>
+          <a href="alerts.html" style="font-size:12.5px;color:var(--primary);text-decoration:none">View all →</a>
+        </div>
+        <div id="alerts-list"><div class="page-loader"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+document.getElementById('date-label').textContent = new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+
+let categoryChart, orderChart;
+
+async function loadStats() {
+  const s = await get('/dashboard/stats');
+  if (!s) return;
+  document.getElementById('stats-grid').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-icon blue">🏷️</div>
+      <div><div class="stat-value">${s.total_products}</div><div class="stat-label">Total Products</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon amber">⚠️</div>
+      <div><div class="stat-value" style="color:var(--warning)">${s.low_stock_count}</div><div class="stat-label">Low Stock Items</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon green">💰</div>
+      <div><div class="stat-value" style="font-size:18px">${fmtCurrency(s.total_stock_value)}</div><div class="stat-label">Total Stock Value</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon purple">📋</div>
+      <div><div class="stat-value">${s.pending_pos}</div><div class="stat-label">Pending POs</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon blue">🛒</div>
+      <div><div class="stat-value">${s.pending_sos}</div><div class="stat-label">Open Sales Orders</div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-icon red">🔔</div>
+      <div><div class="stat-value" style="color:var(--danger)">${s.unread_alerts}</div><div class="stat-label">Unread Alerts</div></div>
+    </div>`;
+}
+
+async function loadCharts() {
+  const cats = await get('/dashboard/stock-by-category');
+  if (cats && cats.length) {
+    const ctx = document.getElementById('categoryChart').getContext('2d');
+    if (categoryChart) categoryChart.destroy();
+    categoryChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: cats.map(c => c.category),
+        datasets: [{ data: cats.map(c => c.total_stock), backgroundColor: ['#2563EB','#10B981','#F59E0B','#EF4444','#6366F1','#0EA5E9'], borderWidth: 0 }]
+      },
+      options: { plugins: { legend: { position: 'bottom', labels: { font: { family: 'Plus Jakarta Sans', size: 12 }, padding: 16, boxWidth: 12 } } }, cutout: '65%' }
+    });
+  }
+
+  // Order status mock chart (combine PO+SO data)
+  const [pos, sos] = await Promise.all([get('/purchase-orders/'), get('/sales-orders/')]);
+  const statusCount = { draft:0, submitted:0, approved:0, received:0, pending:0, delivered:0, cancelled:0 };
+  (pos||[]).forEach(p => { if(statusCount[p.status]!==undefined) statusCount[p.status]++; });
+  (sos||[]).forEach(s => { if(statusCount[s.status]!==undefined) statusCount[s.status]++; });
+  const ctx2 = document.getElementById('orderChart').getContext('2d');
+  if (orderChart) orderChart.destroy();
+  orderChart = new Chart(ctx2, {
+    type: 'bar',
+    data: {
+      labels: Object.keys(statusCount).map(s => s.charAt(0).toUpperCase()+s.slice(1)),
+      datasets: [{ data: Object.values(statusCount), backgroundColor: '#2563EB', borderRadius: 6, barThickness: 28 }]
+    },
+    options: { plugins: { legend: { display: false } }, scales: { x: { grid: { display: false } }, y: { grid: { color: '#f1f5f9' }, ticks: { stepSize: 1 } } } }
+  });
+}
+
+async function loadMovements() {
+  const mv = await get('/dashboard/recent-movements');
+  const el = document.getElementById('movements-list');
+  if (!mv || !mv.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">↕️</div><p>No movements yet</p></div>'; return; }
+  el.innerHTML = mv.map(m => `
+    <div class="alert-item">
+      <div class="alert-dot ${m.movement_type==='in'?'info':m.movement_type==='out'?'danger':'warning'}"></div>
+      <div class="alert-msg">
+        <strong>${m.product_name}</strong>
+        <span style="color:var(--text-muted)"> — ${m.movement_type.toUpperCase()} ${m.quantity} units</span>
+        ${m.reference ? `<span style="color:var(--text-muted);font-size:12px"> (${m.reference})</span>` : ''}
+      </div>
+      <span class="alert-time">${timeAgo(m.created_at)}</span>
+    </div>`).join('');
+}
+
+async function loadAlerts() {
+  const alerts = await get('/alerts/');
+  const el = document.getElementById('alerts-list');
+  const items = (alerts||[]).filter(a => !a.is_read).slice(0,8);
+  if (!items.length) { el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><p>No unread alerts</p></div>'; return; }
+  el.innerHTML = items.map(a => `
+    <div class="alert-item unread ${a.alert_type==='out_of_stock'?'danger-alert':''}">
+      <div class="alert-dot ${a.alert_type==='out_of_stock'?'danger':'warning'}"></div>
+      <div class="alert-msg">${a.message}</div>
+      <span class="alert-time">${timeAgo(a.created_at)}</span>
+    </div>`).join('');
+}
+
+async function loadAll() {
+  await Promise.all([loadStats(), loadMovements(), loadAlerts()]);
+  await loadCharts();
+}
+loadAll();
+</script>
+</body>
+</html>

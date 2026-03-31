@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Alerts — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Alerts</span><span class="topbar-sub">— Notifications</span></div>
+    <div class="topbar-right">
+      <select class="form-control-custom" id="typeFilter" onchange="filterAlerts()" style="width:170px">
+        <option value="">All Types</option>
+        <option value="out_of_stock">Out of Stock</option>
+        <option value="low_stock">Low Stock</option>
+        <option value="overstock">Overstock</option>
+      </select>
+      <button class="btn-secondary-custom" onclick="markAllRead()">✓ Mark all read</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px" id="alertStats"></div>
+    <div class="card">
+      <div class="card-header-custom"><span class="card-title" id="alertCount">Alerts</span></div>
+      <div id="alertsList"><div class="page-loader"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+</div>
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+
+let allAlerts = [];
+
+async function loadAlerts() {
+  allAlerts = await get('/alerts/') || [];
+  renderStats();
+  filterAlerts();
+}
+
+function renderStats() {
+  const out = allAlerts.filter(a => a.alert_type === 'out_of_stock').length;
+  const low = allAlerts.filter(a => a.alert_type === 'low_stock').length;
+  const over = allAlerts.filter(a => a.alert_type === 'overstock').length;
+  const unread = allAlerts.filter(a => !a.is_read).length;
+  document.getElementById('alertStats').innerHTML = `
+    <div class="stat-card"><div class="stat-icon red">🚨</div><div><div class="stat-value" style="color:var(--danger)">${out}</div><div class="stat-label">Out of Stock</div></div></div>
+    <div class="stat-card"><div class="stat-icon amber">⚠️</div><div><div class="stat-value" style="color:var(--warning)">${low}</div><div class="stat-label">Low Stock</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">📦</div><div><div class="stat-value" style="color:var(--info)">${over}</div><div class="stat-label">Overstock</div></div></div>
+    <div class="stat-card"><div class="stat-icon red">🔔</div><div><div class="stat-value" style="color:var(--danger)">${unread}</div><div class="stat-label">Unread</div></div></div>`;
+}
+
+function filterAlerts() {
+  const type = document.getElementById('typeFilter').value;
+  const list = type ? allAlerts.filter(a => a.alert_type === type) : allAlerts;
+  renderList(list);
+}
+
+function renderList(list) {
+  document.getElementById('alertCount').textContent = `Alerts (${list.length})`;
+  const el = document.getElementById('alertsList');
+  if (!list.length) {
+    el.innerHTML = '<div class="empty-state"><div class="empty-icon">✅</div><p>No alerts — everything looks good!</p></div>';
+    return;
+  }
+  const typeIcon = { out_of_stock:'🚨', low_stock:'⚠️', overstock:'📦' };
+  const typeDot  = { out_of_stock:'danger', low_stock:'warning', overstock:'info' };
+  el.innerHTML = list.map(a => `
+    <div class="alert-item ${!a.is_read ? 'unread' : ''} ${a.alert_type === 'out_of_stock' ? 'danger-alert' : ''}" id="alert-${a.id}">
+      <span style="font-size:18px">${typeIcon[a.alert_type] || '🔔'}</span>
+      <div style="flex:1">
+        <div class="alert-msg">${a.message}</div>
+        <div style="font-size:11.5px;color:var(--text-muted);margin-top:3px">${a.product_name || ''} · ${fmtDateTime(a.created_at)}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        ${statusBadge(a.alert_type)}
+        ${!a.is_read ? `<button class="btn-secondary-custom btn-sm" onclick="markRead(${a.id})">✓ Read</button>` : '<span style="color:var(--text-muted);font-size:12px">Read</span>'}
+      </div>
+    </div>`).join('');
+}
+
+async function markRead(id) {
+  await put(`/alerts/${id}/read`);
+  const a = allAlerts.find(x => x.id === id);
+  if (a) a.is_read = true;
+  filterAlerts();
+  renderStats();
+  refreshAlertBadge();
+}
+
+async function markAllRead() {
+  await put('/alerts/read-all');
+  toast('All alerts marked as read');
+  loadAlerts();
+  refreshAlertBadge();
+}
+
+loadAlerts();
+</script>
+</body>
+</html>

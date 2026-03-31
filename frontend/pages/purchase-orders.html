@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Purchase Orders — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Purchase Orders</span><span class="topbar-sub">— Procurement</span></div>
+    <div class="topbar-right">
+      <select class="form-control-custom" id="statusFilter" onchange="filterPOs()" style="width:160px">
+        <option value="">All Status</option>
+        <option value="draft">Draft</option><option value="submitted">Submitted</option>
+        <option value="approved">Approved</option><option value="received">Received</option><option value="cancelled">Cancelled</option>
+      </select>
+      <button class="btn-primary-custom" onclick="openAddModal()">+ New PO</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="card">
+      <div class="card-header-custom"><span class="card-title" id="po-count">Purchase Orders</span></div>
+      <div style="overflow-x:auto">
+        <table class="table-custom">
+          <thead><tr><th>PO Number</th><th>Supplier</th><th>Items</th><th>Total</th><th>Expected</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="poTbody"><tr><td colspan="7"><div class="page-loader"><div class="spinner"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New PO Modal -->
+<div class="modal-backdrop-custom" id="poModal">
+  <div class="modal-box modal-lg">
+    <div class="modal-header-custom">
+      <span class="modal-title">Create Purchase Order</span>
+      <button class="modal-close" onclick="closeModal('poModal')">✕</button>
+    </div>
+    <div class="modal-body-custom">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">
+        <div class="form-group">
+          <label class="form-label-custom">Supplier *</label>
+          <select class="form-control-custom" id="poSupplier"><option value="">— Select supplier —</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Expected Delivery Date</label>
+          <input class="form-control-custom" id="poExpected" type="date">
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label class="form-label-custom">Notes</label>
+          <input class="form-control-custom" id="poNotes" placeholder="Optional notes…">
+        </div>
+      </div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text-primary)">Order Items</div>
+      <div id="poItemsContainer"></div>
+      <button class="btn-secondary-custom btn-sm" onclick="addPOItemRow()" style="margin-top:10px">+ Add Item</button>
+      <div style="margin-top:20px;text-align:right;font-size:15px;font-weight:700">
+        Total: <span id="poTotal" style="color:var(--primary)">₹0.00</span>
+      </div>
+    </div>
+    <div class="modal-footer-custom">
+      <button class="btn-secondary-custom" onclick="closeModal('poModal')">Cancel</button>
+      <button class="btn-primary-custom" onclick="savePO()">Create PO</button>
+    </div>
+  </div>
+</div>
+
+<!-- View PO Modal -->
+<div class="modal-backdrop-custom" id="viewPOModal">
+  <div class="modal-box modal-lg">
+    <div class="modal-header-custom">
+      <span class="modal-title" id="viewPOTitle">Purchase Order</span>
+      <button class="modal-close" onclick="closeModal('viewPOModal')">✕</button>
+    </div>
+    <div class="modal-body-custom" id="viewPOBody"></div>
+  </div>
+</div>
+
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+
+let allPOs = [], suppliers = [], products = [];
+let poItemCount = 0;
+
+async function loadData() {
+  [allPOs, suppliers, products] = await Promise.all([get('/purchase-orders/'), get('/suppliers/'), get('/products/')]);
+  allPOs = allPOs || []; suppliers = suppliers || []; products = products || [];
+  const suppOpts = suppliers.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  document.getElementById('poSupplier').innerHTML = '<option value="">— Select supplier —</option>' + suppOpts;
+  filterPOs();
+}
+
+function filterPOs() {
+  const st = document.getElementById('statusFilter').value;
+  const list = st ? allPOs.filter(p => p.status === st) : allPOs;
+  renderTable(list);
+}
+
+function renderTable(list) {
+  document.getElementById('po-count').textContent = `Purchase Orders (${list.length})`;
+  const tbody = document.getElementById('poTbody');
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">📋</div><p>No purchase orders yet</p></div></td></tr>'; return; }
+  tbody.innerHTML = list.map(po => `<tr>
+    <td><span class="mono fw-600" style="color:var(--primary)">${po.po_number}</span></td>
+    <td>${po.supplier_name}</td>
+    <td>${po.items.length} item${po.items.length !== 1 ? 's' : ''}</td>
+    <td class="mono fw-600">${fmtCurrency(po.total_amount)}</td>
+    <td>${fmtDate(po.expected_date)}</td>
+    <td>${statusBadge(po.status)}</td>
+    <td>
+      <div style="display:flex;gap:6px">
+        <button class="btn-secondary-custom btn-sm" onclick="viewPO(${po.id})">👁 View</button>
+        ${po.status === 'draft' ? `<button class="btn-secondary-custom btn-sm" onclick="updateStatus(${po.id},'submitted')">Submit</button>` : ''}
+        ${po.status === 'submitted' ? `<button class="btn-secondary-custom btn-sm" onclick="updateStatus(${po.id},'approved')">Approve</button>` : ''}
+        ${po.status === 'approved' ? `<button class="btn-primary-custom btn-sm" onclick="updateStatus(${po.id},'received')">✓ Receive</button>` : ''}
+        ${!['received','cancelled'].includes(po.status) ? `<button class="btn-danger-custom btn-sm" onclick="updateStatus(${po.id},'cancelled')">✕</button>` : ''}
+      </div>
+    </td>
+  </tr>`).join('');
+}
+
+function openAddModal() {
+  document.getElementById('poItemsContainer').innerHTML = '';
+  document.getElementById('poNotes').value = '';
+  document.getElementById('poExpected').value = '';
+  poItemCount = 0;
+  addPOItemRow();
+  openModal('poModal');
+}
+
+function addPOItemRow() {
+  const productOpts = products.map(p => `<option value="${p.id}" data-price="${p.cost_price}">${p.sku} — ${p.name}</option>`).join('');
+  const row = document.createElement('div');
+  row.className = 'po-item-row';
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;margin-bottom:10px;align-items:end';
+  row.innerHTML = `
+    <div><label class="form-label-custom">Product</label>
+    <select class="form-control-custom po-product" onchange="autofillPrice(this)">${productOpts}</select></div>
+    <div><label class="form-label-custom">Qty</label><input class="form-control-custom po-qty" type="number" min="1" value="1" oninput="calcTotal()"></div>
+    <div><label class="form-label-custom">Unit Price (₹)</label><input class="form-control-custom po-price" type="number" min="0" value="0" oninput="calcTotal()"></div>
+    <button onclick="this.parentElement.remove();calcTotal()" style="background:var(--danger);color:#fff;border:none;border-radius:8px;width:34px;height:38px;cursor:pointer;margin-top:20px">✕</button>`;
+  document.getElementById('poItemsContainer').appendChild(row);
+  calcTotal();
+}
+
+function autofillPrice(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  const price = opt.dataset.price;
+  sel.closest('.po-item-row').querySelector('.po-price').value = price;
+  calcTotal();
+}
+
+function calcTotal() {
+  let total = 0;
+  document.querySelectorAll('.po-item-row').forEach(row => {
+    const qty = parseFloat(row.querySelector('.po-qty').value) || 0;
+    const price = parseFloat(row.querySelector('.po-price').value) || 0;
+    total += qty * price;
+  });
+  document.getElementById('poTotal').textContent = fmtCurrency(total);
+}
+
+async function savePO() {
+  const suppId = parseInt(document.getElementById('poSupplier').value);
+  if (!suppId) { toast('Select a supplier', 'error'); return; }
+  const items = [];
+  let valid = true;
+  document.querySelectorAll('.po-item-row').forEach(row => {
+    const pid = parseInt(row.querySelector('.po-product').value);
+    const qty = parseInt(row.querySelector('.po-qty').value);
+    const price = parseFloat(row.querySelector('.po-price').value);
+    if (!pid || !qty || qty < 1) { valid = false; return; }
+    items.push({ product_id: pid, quantity_ordered: qty, unit_price: price });
+  });
+  if (!valid || !items.length) { toast('Add at least one valid item', 'error'); return; }
+  const exp = document.getElementById('poExpected').value;
+  try {
+    await post('/purchase-orders/', { supplier_id: suppId, expected_date: exp || null, notes: document.getElementById('poNotes').value, items });
+    toast('Purchase Order created');
+    closeModal('poModal');
+    loadData();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function updateStatus(id, status) {
+  const po = allPOs.find(p => p.id === id);
+  const action = status === 'received' ? `receive all stock from ${po.po_number}` : `mark as ${status}`;
+  if (!confirm(`Are you sure you want to ${action}?`)) return;
+  try {
+    await put(`/purchase-orders/${id}/status?status=${status}`);
+    toast(`PO ${status === 'received' ? 'received — stock updated!' : 'updated to ' + status}`, status === 'received' ? 'success' : 'success');
+    loadData();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function viewPO(id) {
+  const po = await get(`/purchase-orders/${id}`);
+  if (!po) return;
+  document.getElementById('viewPOTitle').textContent = po.po_number;
+  document.getElementById('viewPOBody').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Supplier</div><div style="font-weight:700;margin-top:4px">${po.supplier_name}</div></div>
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Status</div><div style="margin-top:4px">${statusBadge(po.status)}</div></div>
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Expected</div><div style="font-weight:600;margin-top:4px">${fmtDate(po.expected_date)}</div></div>
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Created</div><div style="font-weight:600;margin-top:4px">${fmtDate(po.created_at)}</div></div>
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Total Amount</div><div style="font-weight:800;font-size:18px;color:var(--primary);margin-top:4px">${fmtCurrency(po.total_amount)}</div></div>
+    </div>
+    ${po.notes ? `<div style="background:var(--surface);padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;color:var(--text-secondary)">📝 ${po.notes}</div>` : ''}
+    <table class="table-custom">
+      <thead><tr><th>Product</th><th>SKU</th><th>Ordered</th><th>Received</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+      <tbody>${po.items.map(i => `<tr>
+        <td><strong>${i.product_name}</strong></td>
+        <td class="mono">${i.product_sku}</td>
+        <td>${i.quantity_ordered}</td>
+        <td>${i.quantity_received}</td>
+        <td class="mono">${fmtCurrency(i.unit_price)}</td>
+        <td class="mono fw-600">${fmtCurrency(i.quantity_ordered * i.unit_price)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  openModal('viewPOModal');
+}
+
+loadData();
+</script>
+</body>
+</html>

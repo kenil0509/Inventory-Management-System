@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stock Levels — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Stock Levels</span><span class="topbar-sub">— Real-time inventory</span></div>
+    <div class="topbar-right">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" class="form-control-custom" id="searchInput" placeholder="Search product…" oninput="filterStock()">
+      </div>
+      <select class="form-control-custom" id="statusFilter" onchange="filterStock()" style="width:150px">
+        <option value="">All Status</option>
+        <option value="out">Out of Stock</option>
+        <option value="low">Low Stock</option>
+        <option value="ok">Healthy</option>
+      </select>
+      <button class="btn-primary-custom" onclick="openModal('adjustModal')">⚡ Adjust Stock</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="card">
+      <div class="card-header-custom">
+        <span class="card-title" id="stock-count">Stock Entries</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="table-custom">
+          <thead><tr>
+            <th>SKU</th><th>Product</th><th>Warehouse</th>
+            <th>Quantity</th><th>Reorder At</th><th>Status</th><th>Action</th>
+          </tr></thead>
+          <tbody id="stockTbody">
+            <tr><td colspan="7"><div class="page-loader"><div class="spinner"></div></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Adjust Stock Modal -->
+<div class="modal-backdrop-custom" id="adjustModal">
+  <div class="modal-box">
+    <div class="modal-header-custom">
+      <span class="modal-title" id="adjustTitle">Adjust Stock</span>
+      <button class="modal-close" onclick="closeModal('adjustModal')">✕</button>
+    </div>
+    <div class="modal-body-custom">
+      <div class="form-group">
+        <label class="form-label-custom">Product *</label>
+        <select class="form-control-custom" id="adjProduct"><option value="">— Select product —</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label-custom">Warehouse *</label>
+        <select class="form-control-custom" id="adjWarehouse"><option value="">— Select warehouse —</option></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label-custom">Movement Type</label>
+        <select class="form-control-custom" id="adjType">
+          <option value="in">Stock In (Receive)</option>
+          <option value="out">Stock Out (Issue)</option>
+          <option value="adjustment">Manual Adjustment (set exact qty)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label-custom">Quantity *</label>
+        <input class="form-control-custom" id="adjQty" type="number" min="0" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label-custom">Note</label>
+        <input class="form-control-custom" id="adjNote" placeholder="Reason or reference…">
+      </div>
+    </div>
+    <div class="modal-footer-custom">
+      <button class="btn-secondary-custom" onclick="closeModal('adjustModal')">Cancel</button>
+      <button class="btn-primary-custom" onclick="saveAdjustment()">Apply Adjustment</button>
+    </div>
+  </div>
+</div>
+
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+
+let allStock = [];
+
+async function loadStock() {
+  allStock = await get('/stock/') || [];
+  filterStock();
+}
+
+function filterStock() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const st = document.getElementById('statusFilter').value;
+  let list = allStock;
+  if (q) list = list.filter(s => s.product_name.toLowerCase().includes(q) || s.product_sku.toLowerCase().includes(q));
+  if (st) list = list.filter(s => s.status === st);
+  renderTable(list);
+}
+
+function renderTable(list) {
+  document.getElementById('stock-count').textContent = `Stock Entries (${list.length})`;
+  const tbody = document.getElementById('stockTbody');
+  if (!list.length) {
+    tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">📊</div><p>No stock data found</p></div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map(s => `<tr>
+    <td><span class="mono" style="color:var(--primary);font-weight:600">${s.product_sku}</span></td>
+    <td><strong>${s.product_name}</strong></td>
+    <td>${s.warehouse_name}</td>
+    <td>${stockBar(s.quantity, s.reorder_point, s.reorder_point * 10)}</td>
+    <td><span class="mono">${s.reorder_point}</span></td>
+    <td>${statusBadge(s.status === 'ok' ? 'healthy' : s.status === 'low' ? 'low_stock' : 'out_of_stock')}</td>
+    <td>
+      <button class="btn-secondary-custom btn-sm" onclick="quickAdjust(${s.product_id}, ${s.warehouse_id}, '${s.product_name}')">⚡ Adjust</button>
+    </td>
+  </tr>`).join('');
+}
+
+function quickAdjust(productId, warehouseId, productName) {
+  document.getElementById('adjustTitle').textContent = `Adjust: ${productName}`;
+  document.getElementById('adjProduct').value = productId;
+  document.getElementById('adjWarehouse').value = warehouseId;
+  openModal('adjustModal');
+}
+
+async function loadDropdowns() {
+  const [products, warehouses] = await Promise.all([get('/products/'), get('/stock/warehouses')]);
+  const pOpts = (products||[]).map(p => `<option value="${p.id}">${p.sku} — ${p.name}</option>`).join('');
+  document.getElementById('adjProduct').innerHTML = '<option value="">— Select product —</option>' + pOpts;
+  const wOpts = (warehouses||[]).map(w => `<option value="${w.id}">${w.name}</option>`).join('');
+  document.getElementById('adjWarehouse').innerHTML = '<option value="">— Select warehouse —</option>' + wOpts;
+}
+
+async function saveAdjustment() {
+  const body = {
+    product_id: parseInt(document.getElementById('adjProduct').value),
+    warehouse_id: parseInt(document.getElementById('adjWarehouse').value),
+    quantity: parseInt(document.getElementById('adjQty').value),
+    movement_type: document.getElementById('adjType').value,
+    note: document.getElementById('adjNote').value
+  };
+  if (!body.product_id || !body.warehouse_id || !body.quantity) { toast('Fill all required fields', 'error'); return; }
+  try {
+    const res = await post('/stock/adjust', body);
+    toast(`Stock updated. New qty: ${res.new_quantity}`);
+    closeModal('adjustModal');
+    loadStock();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+loadDropdowns();
+loadStock();
+</script>
+</body>
+</html>

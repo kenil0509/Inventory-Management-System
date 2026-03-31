@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Login — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+<style>
+body { background: linear-gradient(135deg, #0F172A 0%, #1E3A5F 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+.login-card { background: #fff; border-radius: 20px; padding: 48px 44px; width: 100%; max-width: 420px; box-shadow: 0 24px 64px rgba(0,0,0,.3); }
+.login-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 36px; }
+.login-logo .icon { width: 44px; height: 44px; background: var(--primary); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+.login-logo .brand { font-size: 22px; font-weight: 800; color: var(--dark); }
+.login-logo .sub { font-size: 12px; color: var(--text-muted); }
+h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.subtitle { color: var(--text-muted); font-size: 13.5px; margin-bottom: 30px; }
+.demo-creds { background: var(--surface); border: 1px dashed var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 24px; font-size: 12.5px; color: var(--text-secondary); line-height: 2; }
+.demo-creds strong { color: var(--text-primary); }
+.btn-login { width: 100%; padding: 12px; font-size: 15px; font-weight: 700; margin-top: 8px; border-radius: 10px; }
+.error-msg { color: var(--danger); font-size: 13px; margin-top: 10px; display: none; }
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="login-logo">
+    <div class="icon">📦</div>
+    <div><div class="brand">InvenTrack</div><div class="sub">Inventory Management System</div></div>
+  </div>
+  <h1>Welcome back 👋</h1>
+  <p class="subtitle">Sign in to manage your inventory</p>
+  <div class="demo-creds">
+    <strong>Demo credentials:</strong><br>
+    Admin: <strong><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="4021242d292e00292d336e232f2d">[email&#160;protected]</a></strong> / <strong>admin123</strong><br>
+    Manager: <strong><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="c9a4a8a7a8aeacbb89a0a4bae7aaa6a4">[email&#160;protected]</a></strong> / <strong>manager123</strong>
+  </div>
+  <form id="loginForm">
+    <div class="form-group">
+      <label class="form-label-custom">Email address</label>
+      <input type="email" id="email" class="form-control-custom" placeholder="you@example.com" value="admin@ims.com" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label-custom">Password</label>
+      <input type="password" id="password" class="form-control-custom" placeholder="••••••••" value="admin123" required>
+    </div>
+    <div class="error-msg" id="errorMsg"></div>
+    <button type="submit" class="btn-primary-custom btn-login" id="loginBtn">Sign In</button>
+  </form>
+</div>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script src="../static/js/app.js"></script>
+<script>
+if (Auth.isLoggedIn()) window.location.href = 'dashboard.html';
+
+document.getElementById('loginForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  const err = document.getElementById('errorMsg');
+  btn.textContent = 'Signing in…'; btn.disabled = true; err.style.display = 'none';
+  try {
+    const data = await post('/auth/login', {
+      email: document.getElementById('email').value,
+      password: document.getElementById('password').value
+    });
+    if (!data) throw new Error('Invalid credentials');
+    if (!data.access_token) throw new Error(data.detail || 'Login failed');
+    Auth.set(data.access_token, data.user);
+    window.location.href = 'dashboard.html';
+  } catch (e) {
+    err.textContent = e.message || 'Invalid credentials'; err.style.display = 'block';
+    btn.textContent = 'Sign In'; btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reports — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+.tab-bar { display:flex; gap:4px; margin-bottom:24px; background:var(--surface); padding:4px; border-radius:10px; display:inline-flex; border:1px solid var(--border); }
+.tab-btn { padding:8px 20px; border:none; background:none; border-radius:8px; cursor:pointer; font-family:inherit; font-size:13.5px; font-weight:500; color:var(--text-secondary); transition:var(--transition); }
+.tab-btn.active { background:var(--card); color:var(--primary); font-weight:700; box-shadow:var(--shadow-sm); }
+</style>
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Reports</span><span class="topbar-sub">— Analytics</span></div>
+    <div class="topbar-right">
+      <button class="btn-secondary-custom btn-sm" onclick="loadAll()">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="tab-bar">
+      <button class="tab-btn active" onclick="showTab('valuation',this)">📊 Stock Valuation</button>
+      <button class="tab-btn" onclick="showTab('top',this)">🏆 Top Products</button>
+      <button class="tab-btn" onclick="showTab('summary',this)">📈 Summary</button>
+    </div>
+
+    <!-- Stock Valuation -->
+    <div id="tab-valuation">
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header-custom"><span class="card-title">Stock Valuation Report</span></div>
+        <div id="valuationTotals" style="display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-bottom:1px solid var(--border)"></div>
+        <div style="overflow-x:auto">
+          <table class="table-custom">
+            <thead><tr><th>SKU</th><th>Product</th><th>Qty</th><th>Cost Price</th><th>Selling Price</th><th>Cost Value</th><th>Retail Value</th><th>Potential Profit</th></tr></thead>
+            <tbody id="valuationTbody"><tr><td colspan="8"><div class="page-loader"><div class="spinner"></div></div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Top Products -->
+    <div id="tab-top" style="display:none">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div class="card">
+          <div class="card-header-custom"><span class="card-title">Top Products by Qty Sold</span></div>
+          <div class="card-body-custom"><canvas id="topChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-header-custom"><span class="card-title">Revenue by Product</span></div>
+          <div style="overflow-x:auto">
+            <table class="table-custom">
+              <thead><tr><th>#</th><th>Product</th><th>SKU</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
+              <tbody id="topTbody"><tr><td colspan="5"><div class="page-loader"><div class="spinner"></div></div></td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary -->
+    <div id="tab-summary" style="display:none">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px" id="summaryCards"></div>
+    </div>
+  </div>
+</div>
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+
+let topChart;
+
+function showTab(name, btn) {
+  document.querySelectorAll('[id^="tab-"]').forEach(t => t.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).style.display = '';
+  btn.classList.add('active');
+}
+
+async function loadValuation() {
+  const data = await get('/reports/stock-valuation');
+  if (!data) return;
+  const { items, totals } = data;
+  document.getElementById('valuationTotals').innerHTML = `
+    <div style="padding:18px 22px;border-right:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted)">Total Cost Value</div>
+      <div style="font-size:22px;font-weight:800;color:var(--text-primary);margin-top:4px">${fmtCurrency(totals.total_cost_value)}</div>
+    </div>
+    <div style="padding:18px 22px;border-right:1px solid var(--border)">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted)">Total Retail Value</div>
+      <div style="font-size:22px;font-weight:800;color:var(--primary);margin-top:4px">${fmtCurrency(totals.total_retail_value)}</div>
+    </div>
+    <div style="padding:18px 22px">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--text-muted)">Potential Profit</div>
+      <div style="font-size:22px;font-weight:800;color:var(--success);margin-top:4px">${fmtCurrency(totals.total_potential_profit)}</div>
+    </div>`;
+  document.getElementById('valuationTbody').innerHTML = items.map((p, i) => `<tr>
+    <td><span class="mono" style="color:var(--primary)">${p.sku}</span></td>
+    <td><strong>${p.name}</strong></td>
+    <td class="mono">${p.quantity}</td>
+    <td class="mono">${fmtCurrency(p.cost_price)}</td>
+    <td class="mono">${fmtCurrency(p.selling_price)}</td>
+    <td class="mono fw-600">${fmtCurrency(p.cost_value)}</td>
+    <td class="mono fw-600" style="color:var(--primary)">${fmtCurrency(p.retail_value)}</td>
+    <td class="mono fw-600" style="color:var(--success)">${fmtCurrency(p.potential_profit)}</td>
+  </tr>`).join('');
+}
+
+async function loadTop() {
+  const data = await get('/reports/top-products');
+  if (!data) return;
+  document.getElementById('topTbody').innerHTML = data.length
+    ? data.map((p, i) => `<tr>
+        <td><span style="font-weight:800;color:${i===0?'#F59E0B':i===1?'#94A3B8':i===2?'#CD7C4A':'var(--text-muted)'}">${i+1}</span></td>
+        <td><strong>${p.product_name}</strong></td><td class="mono">${p.sku}</td>
+        <td class="mono">${p.total_qty_sold}</td>
+        <td class="mono fw-600" style="color:var(--success)">${fmtCurrency(p.total_revenue)}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🏆</div><p>No sales data yet</p></div></td></tr>';
+  if (data.length) {
+    const ctx = document.getElementById('topChart').getContext('2d');
+    if (topChart) topChart.destroy();
+    topChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: data.map(p => p.product_name.length > 20 ? p.product_name.slice(0,20)+'…' : p.product_name),
+        datasets: [{ label:'Qty Sold', data: data.map(p => p.total_qty_sold), backgroundColor: '#2563EB', borderRadius: 6, barThickness: 22 }]
+      },
+      options: { indexAxis:'y', plugins:{ legend:{display:false} }, scales:{ x:{ grid:{color:'#f1f5f9'} }, y:{ grid:{display:false} } } }
+    });
+  }
+}
+
+async function loadSummary() {
+  const s = await get('/reports/summary');
+  if (!s) return;
+  document.getElementById('summaryCards').innerHTML = `
+    <div class="stat-card"><div class="stat-icon blue">🏷️</div><div><div class="stat-value">${s.total_products}</div><div class="stat-label">Active Products</div></div></div>
+    <div class="stat-card"><div class="stat-icon purple">📋</div><div><div class="stat-value">${s.total_purchase_orders}</div><div class="stat-label">Total POs</div></div></div>
+    <div class="stat-card"><div class="stat-icon blue">🛒</div><div><div class="stat-value">${s.total_sales_orders}</div><div class="stat-label">Total Sales Orders</div></div></div>
+    <div class="stat-card"><div class="stat-icon green">💰</div><div><div class="stat-value" style="font-size:18px">${fmtCurrency(s.total_revenue)}</div><div class="stat-label">Total Revenue</div></div></div>`;
+}
+
+function loadAll() { loadValuation(); loadTop(); loadSummary(); }
+loadAll();
+</script>
+</body>
+</html>

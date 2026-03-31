@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Customers — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Customers</span><span class="topbar-sub">— Client management</span></div>
+    <div class="topbar-right">
+      <div class="search-wrap"><span class="search-icon">🔍</span>
+        <input type="text" class="form-control-custom" id="searchInput" placeholder="Search customers…" oninput="filter()">
+      </div>
+      <button class="btn-primary-custom" onclick="openAddModal()">+ Add Customer</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="card">
+      <div class="card-header-custom"><span class="card-title" id="custCount">Customers</span></div>
+      <div style="overflow-x:auto">
+        <table class="table-custom">
+          <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Address</th><th>Member Since</th></tr></thead>
+          <tbody id="custTbody"><tr><td colspan="5"><div class="page-loader"><div class="spinner"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop-custom" id="custModal">
+  <div class="modal-box">
+    <div class="modal-header-custom">
+      <span class="modal-title">Add Customer</span>
+      <button class="modal-close" onclick="closeModal('custModal')">✕</button>
+    </div>
+    <div class="modal-body-custom">
+      <div class="form-group"><label class="form-label-custom">Name *</label><input class="form-control-custom" id="cName" placeholder="Company or person name"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="form-group"><label class="form-label-custom">Email</label><input class="form-control-custom" id="cEmail" type="email" placeholder="email@example.com"></div>
+        <div class="form-group"><label class="form-label-custom">Phone</label><input class="form-control-custom" id="cPhone" placeholder="9876543210"></div>
+      </div>
+      <div class="form-group"><label class="form-label-custom">Address</label><textarea class="form-control-custom" id="cAddress" rows="2" placeholder="Full address"></textarea></div>
+    </div>
+    <div class="modal-footer-custom">
+      <button class="btn-secondary-custom" onclick="closeModal('custModal')">Cancel</button>
+      <button class="btn-primary-custom" onclick="saveCustomer()">Add Customer</button>
+    </div>
+  </div>
+</div>
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+let all = [];
+
+async function load() {
+  all = await get('/sales-orders/customers') || [];
+  render(all);
+}
+function filter() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  render(q ? all.filter(c => c.name.toLowerCase().includes(q) || (c.email||'').toLowerCase().includes(q)) : all);
+}
+function render(list) {
+  document.getElementById('custCount').textContent = `Customers (${list.length})`;
+  const tbody = document.getElementById('custTbody');
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">👥</div><p>No customers yet</p></div></td></tr>'; return; }
+  tbody.innerHTML = list.map(c => `<tr>
+    <td><strong>${c.name}</strong></td>
+    <td>${c.email ? `<a href="mailto:${c.email}" style="color:var(--primary)">${c.email}</a>` : '—'}</td>
+    <td>${c.phone || '—'}</td>
+    <td style="color:var(--text-muted)">${c.address || '—'}</td>
+    <td>${fmtDate(c.created_at)}</td>
+  </tr>`).join('');
+}
+function openAddModal() {
+  ['cName','cEmail','cPhone','cAddress'].forEach(id => document.getElementById(id).value = '');
+  openModal('custModal');
+}
+async function saveCustomer() {
+  const name = document.getElementById('cName').value.trim();
+  if (!name) { toast('Name is required', 'error'); return; }
+  try {
+    await post('/sales-orders/customers', { name, email: document.getElementById('cEmail').value, phone: document.getElementById('cPhone').value, address: document.getElementById('cAddress').value });
+    toast('Customer added');
+    closeModal('custModal');
+    load();
+  } catch(e) { toast(e.message, 'error'); }
+}
+load();
+</script>
+</body>
+</html>

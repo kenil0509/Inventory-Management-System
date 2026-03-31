@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sales Orders — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Sales Orders</span><span class="topbar-sub">— Fulfillment</span></div>
+    <div class="topbar-right">
+      <select class="form-control-custom" id="statusFilter" onchange="filterSOs()" style="width:160px">
+        <option value="">All Status</option>
+        <option value="pending">Pending</option><option value="confirmed">Confirmed</option>
+        <option value="picked">Picked</option><option value="shipped">Shipped</option>
+        <option value="delivered">Delivered</option><option value="cancelled">Cancelled</option>
+      </select>
+      <button class="btn-primary-custom" onclick="openAddModal()">+ New Sale</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="card">
+      <div class="card-header-custom"><span class="card-title" id="so-count">Sales Orders</span></div>
+      <div style="overflow-x:auto">
+        <table class="table-custom">
+          <thead><tr><th>SO Number</th><th>Customer</th><th>Items</th><th>Total</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="soTbody"><tr><td colspan="7"><div class="page-loader"><div class="spinner"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New SO Modal -->
+<div class="modal-backdrop-custom" id="soModal">
+  <div class="modal-box modal-lg">
+    <div class="modal-header-custom">
+      <span class="modal-title">Create Sales Order</span>
+      <button class="modal-close" onclick="closeModal('soModal')">✕</button>
+    </div>
+    <div class="modal-body-custom">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px">
+        <div class="form-group">
+          <label class="form-label-custom">Customer *</label>
+          <select class="form-control-custom" id="soCustomer"><option value="">— Select customer —</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Shipping Address</label>
+          <input class="form-control-custom" id="soShipping" placeholder="Delivery address">
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label class="form-label-custom">Notes</label>
+          <input class="form-control-custom" id="soNotes" placeholder="Optional notes…">
+        </div>
+      </div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px">Order Items</div>
+      <div id="soItemsContainer"></div>
+      <button class="btn-secondary-custom btn-sm" onclick="addSOItemRow()">+ Add Item</button>
+      <div style="margin-top:20px;text-align:right;font-size:15px;font-weight:700">
+        Total: <span id="soTotal" style="color:var(--primary)">₹0.00</span>
+      </div>
+    </div>
+    <div class="modal-footer-custom">
+      <button class="btn-secondary-custom" onclick="closeModal('soModal')">Cancel</button>
+      <button class="btn-primary-custom" onclick="saveSO()">Create Order</button>
+    </div>
+  </div>
+</div>
+
+<!-- View SO Modal -->
+<div class="modal-backdrop-custom" id="viewSOModal">
+  <div class="modal-box modal-lg">
+    <div class="modal-header-custom">
+      <span class="modal-title" id="viewSOTitle">Sales Order</span>
+      <button class="modal-close" onclick="closeModal('viewSOModal')">✕</button>
+    </div>
+    <div class="modal-body-custom" id="viewSOBody"></div>
+  </div>
+</div>
+
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+
+let allSOs = [], customers = [], products = [];
+
+async function loadData() {
+  [allSOs, customers, products] = await Promise.all([get('/sales-orders/'), get('/sales-orders/customers'), get('/products/')]);
+  allSOs = allSOs || []; customers = customers || []; products = products || [];
+  const custOpts = customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  document.getElementById('soCustomer').innerHTML = '<option value="">— Select customer —</option>' + custOpts;
+  filterSOs();
+}
+
+function filterSOs() {
+  const st = document.getElementById('statusFilter').value;
+  const list = st ? allSOs.filter(s => s.status === st) : allSOs;
+  renderTable(list);
+}
+
+const STATUS_FLOW = { pending: 'confirmed', confirmed: 'picked', picked: 'shipped', shipped: 'delivered' };
+
+function renderTable(list) {
+  document.getElementById('so-count').textContent = `Sales Orders (${list.length})`;
+  const tbody = document.getElementById('soTbody');
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🛒</div><p>No sales orders yet</p></div></td></tr>'; return; }
+  tbody.innerHTML = list.map(so => {
+    const next = STATUS_FLOW[so.status];
+    const nextLabels = { confirmed:'Confirm', picked:'Mark Picked', shipped:'Ship', delivered:'Deliver' };
+    return `<tr>
+      <td><span class="mono fw-600" style="color:var(--primary)">${so.so_number}</span></td>
+      <td>${so.customer_name}</td>
+      <td>${so.items.length} item${so.items.length !== 1 ? 's' : ''}</td>
+      <td class="mono fw-600">${fmtCurrency(so.total_amount)}</td>
+      <td>${fmtDate(so.created_at)}</td>
+      <td>${statusBadge(so.status)}</td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn-secondary-custom btn-sm" onclick="viewSO(${so.id})">👁 View</button>
+          ${next ? `<button class="btn-primary-custom btn-sm" onclick="updateStatus(${so.id},'${next}')">${nextLabels[next]}</button>` : ''}
+          ${!['delivered','cancelled'].includes(so.status) ? `<button class="btn-danger-custom btn-sm" onclick="updateStatus(${so.id},'cancelled')">✕</button>` : ''}
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openAddModal() {
+  document.getElementById('soItemsContainer').innerHTML = '';
+  document.getElementById('soNotes').value = '';
+  document.getElementById('soShipping').value = '';
+  addSOItemRow();
+  openModal('soModal');
+}
+
+function addSOItemRow() {
+  const productOpts = products.map(p => `<option value="${p.id}" data-price="${p.selling_price}" data-stock="${p.total_stock}">${p.sku} — ${p.name} (stock: ${p.total_stock})</option>`).join('');
+  const row = document.createElement('div');
+  row.style.cssText = 'display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:10px;margin-bottom:10px;align-items:end';
+  row.innerHTML = `
+    <div><label class="form-label-custom">Product</label>
+    <select class="form-control-custom so-product" onchange="autofillSOPrice(this)">${productOpts}</select></div>
+    <div><label class="form-label-custom">Qty</label><input class="form-control-custom so-qty" type="number" min="1" value="1" oninput="calcSOTotal()"></div>
+    <div><label class="form-label-custom">Unit Price (₹)</label><input class="form-control-custom so-price" type="number" min="0" value="0" oninput="calcSOTotal()"></div>
+    <button onclick="this.parentElement.remove();calcSOTotal()" style="background:var(--danger);color:#fff;border:none;border-radius:8px;width:34px;height:38px;cursor:pointer;margin-top:20px">✕</button>`;
+  document.getElementById('soItemsContainer').appendChild(row);
+  calcSOTotal();
+}
+
+function autofillSOPrice(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  sel.closest('div').parentElement.querySelector('.so-price').value = opt.dataset.price;
+  calcSOTotal();
+}
+
+function calcSOTotal() {
+  let total = 0;
+  document.querySelectorAll('#soItemsContainer > div').forEach(row => {
+    total += (parseFloat(row.querySelector('.so-qty').value) || 0) * (parseFloat(row.querySelector('.so-price').value) || 0);
+  });
+  document.getElementById('soTotal').textContent = fmtCurrency(total);
+}
+
+async function saveSO() {
+  const custId = parseInt(document.getElementById('soCustomer').value);
+  if (!custId) { toast('Select a customer', 'error'); return; }
+  const items = [];
+  document.querySelectorAll('#soItemsContainer > div').forEach(row => {
+    const pid = parseInt(row.querySelector('.so-product').value);
+    const qty = parseInt(row.querySelector('.so-qty').value);
+    const price = parseFloat(row.querySelector('.so-price').value);
+    if (pid && qty >= 1) items.push({ product_id: pid, quantity: qty, unit_price: price });
+  });
+  if (!items.length) { toast('Add at least one item', 'error'); return; }
+  try {
+    await post('/sales-orders/', { customer_id: custId, shipping_address: document.getElementById('soShipping').value, notes: document.getElementById('soNotes').value, items });
+    toast('Sales Order created');
+    closeModal('soModal');
+    loadData();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function updateStatus(id, status) {
+  if (!confirm(`Move order to "${status}"?`)) return;
+  try {
+    await put(`/sales-orders/${id}/status?status=${status}`);
+    toast(`Order ${status}${status === 'shipped' ? ' — stock deducted' : ''}`);
+    loadData();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function viewSO(id) {
+  const so = await get(`/sales-orders/${id}`);
+  if (!so) return;
+  document.getElementById('viewSOTitle').textContent = so.so_number;
+  document.getElementById('viewSOBody').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px">
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Customer</div><div style="font-weight:700;margin-top:4px">${so.customer_name}</div></div>
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Status</div><div style="margin-top:4px">${statusBadge(so.status)}</div></div>
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Total</div><div style="font-weight:800;font-size:18px;color:var(--primary);margin-top:4px">${fmtCurrency(so.total_amount)}</div></div>
+      <div><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Order Date</div><div style="font-weight:600;margin-top:4px">${fmtDate(so.created_at)}</div></div>
+      <div style="grid-column:2/-1"><div style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase">Shipping Address</div><div style="margin-top:4px">${so.shipping_address || '—'}</div></div>
+    </div>
+    <table class="table-custom">
+      <thead><tr><th>Product</th><th>SKU</th><th>Qty</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+      <tbody>${so.items.map(i => `<tr>
+        <td><strong>${i.product_name}</strong></td>
+        <td class="mono">${i.product_sku}</td>
+        <td>${i.quantity}</td>
+        <td class="mono">${fmtCurrency(i.unit_price)}</td>
+        <td class="mono fw-600">${fmtCurrency(i.subtotal)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+  openModal('viewSOModal');
+}
+
+loadData();
+</script>
+</body>
+</html>

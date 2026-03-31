@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stock Movements — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Stock Movements</span><span class="topbar-sub">— Audit trail</span></div>
+    <div class="topbar-right">
+      <select class="form-control-custom" id="typeFilter" onchange="filterMovements()" style="width:160px">
+        <option value="">All Types</option>
+        <option value="in">Stock In</option>
+        <option value="out">Stock Out</option>
+        <option value="adjustment">Adjustment</option>
+      </select>
+      <button class="btn-secondary-custom btn-sm" onclick="loadMovements()">↻ Refresh</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="card">
+      <div class="card-header-custom"><span class="card-title" id="moveCount">Stock Movements</span></div>
+      <div style="overflow-x:auto">
+        <table class="table-custom">
+          <thead><tr><th>Product</th><th>Warehouse</th><th>Type</th><th>Quantity</th><th>Reference</th><th>Note</th><th>Date</th></tr></thead>
+          <tbody id="moveTbody"><tr><td colspan="7"><div class="page-loader"><div class="spinner"></div></div></td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+let allMoves = [];
+
+async function loadMovements() {
+  allMoves = await get('/stock/movements') || [];
+  filterMovements();
+}
+
+function filterMovements() {
+  const type = document.getElementById('typeFilter').value;
+  const list = type ? allMoves.filter(m => m.movement_type === type) : allMoves;
+  document.getElementById('moveCount').textContent = `Stock Movements (${list.length})`;
+  const tbody = document.getElementById('moveTbody');
+  if (!list.length) { tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">↕️</div><p>No movements recorded</p></div></td></tr>'; return; }
+  const typeStyle = { in: 'success', out: 'danger', adjustment: 'info', transfer: 'purple' };
+  tbody.innerHTML = list.map(m => `<tr>
+    <td><strong>${m.product_name}</strong></td>
+    <td>${m.warehouse_name}</td>
+    <td>${statusBadge(m.movement_type === 'in' ? 'received' : m.movement_type === 'out' ? 'shipped' : 'draft')}</td>
+    <td><span class="mono fw-600" style="color:${m.movement_type==='in'?'var(--success)':m.movement_type==='out'?'var(--danger)':'var(--info)'}">${m.movement_type==='in'?'+':''}${m.movement_type==='out'?'-':''}${m.quantity}</span></td>
+    <td><span class="mono" style="font-size:12px">${m.reference || '—'}</span></td>
+    <td style="color:var(--text-muted);font-size:13px">${m.note || '—'}</td>
+    <td style="white-space:nowrap">${fmtDateTime(m.created_at)}</td>
+  </tr>`).join('');
+}
+loadMovements();
+</script>
+</body>
+</html>

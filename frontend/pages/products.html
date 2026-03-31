@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Products — InvenTrack</title>
+<link rel="stylesheet" href="../static/css/main.css">
+</head>
+<body>
+<div id="sidebar-mount"></div>
+<div class="main-content">
+  <div class="topbar">
+    <div><span class="topbar-title">Products</span><span class="topbar-sub">— Catalog</span></div>
+    <div class="topbar-right">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" class="form-control-custom" id="searchInput" placeholder="Search SKU or name…" oninput="filterProducts()">
+      </div>
+      <select class="form-control-custom" id="catFilter" onchange="filterProducts()" style="width:160px">
+        <option value="">All Categories</option>
+      </select>
+      <button class="btn-primary-custom" onclick="openModal('productModal')">+ Add Product</button>
+    </div>
+  </div>
+  <div class="page-body">
+    <div class="card">
+      <div class="card-header-custom">
+        <span class="card-title" id="product-count">Products</span>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="lowStockFilter" onchange="filterProducts()"> Show low stock only
+        </label>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="table-custom" id="productsTable">
+          <thead><tr>
+            <th>SKU</th><th>Name</th><th>Category</th><th>Unit</th>
+            <th>Cost Price</th><th>Selling Price</th><th>Stock</th><th>Status</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="productsTbody">
+            <tr><td colspan="9"><div class="page-loader"><div class="spinner"></div> Loading…</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Product Modal -->
+<div class="modal-backdrop-custom" id="productModal">
+  <div class="modal-box">
+    <div class="modal-header-custom">
+      <span class="modal-title" id="modalTitle">Add Product</span>
+      <button class="modal-close" onclick="closeModal('productModal')">✕</button>
+    </div>
+    <div class="modal-body-custom">
+      <input type="hidden" id="editId">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="form-group">
+          <label class="form-label-custom">SKU *</label>
+          <input class="form-control-custom" id="fSku" placeholder="ELEC-001">
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Product Name *</label>
+          <input class="form-control-custom" id="fName" placeholder="Product name">
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Category</label>
+          <select class="form-control-custom" id="fCat"><option value="">— Select —</option></select>
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Unit</label>
+          <select class="form-control-custom" id="fUnit">
+            <option>piece</option><option>kg</option><option>litre</option>
+            <option>box</option><option>roll</option><option>ream</option><option>pack</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Cost Price (₹)</label>
+          <input class="form-control-custom" id="fCost" type="number" min="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Selling Price (₹)</label>
+          <input class="form-control-custom" id="fSell" type="number" min="0" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Reorder Point</label>
+          <input class="form-control-custom" id="fReorder" type="number" min="0" placeholder="10">
+        </div>
+        <div class="form-group">
+          <label class="form-label-custom">Max Stock</label>
+          <input class="form-control-custom" id="fMax" type="number" min="0" placeholder="500">
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label class="form-label-custom">Barcode / SKU Code</label>
+          <input class="form-control-custom" id="fBarcode" placeholder="Optional barcode">
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label class="form-label-custom">Description</label>
+          <textarea class="form-control-custom" id="fDesc" rows="2" placeholder="Optional description"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer-custom">
+      <button class="btn-secondary-custom" onclick="closeModal('productModal')">Cancel</button>
+      <button class="btn-primary-custom" onclick="saveProduct()">Save Product</button>
+    </div>
+  </div>
+</div>
+
+<script src="../static/js/sidebar.js"></script>
+<script src="../static/js/app.js"></script>
+<script>
+Auth.requireAuth();
+renderSidebar();
+
+let allProducts = [], categories = [];
+
+async function loadCategories() {
+  categories = await get('/products/categories/all') || [];
+  const opts = categories.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+  document.getElementById('catFilter').innerHTML = '<option value="">All Categories</option>' + opts;
+  document.getElementById('fCat').innerHTML = '<option value="">— Select —</option>' + opts;
+}
+
+async function loadProducts() {
+  allProducts = await get('/products/') || [];
+  renderTable(allProducts);
+}
+
+function filterProducts() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const catId = document.getElementById('catFilter').value;
+  const lowOnly = document.getElementById('lowStockFilter').checked;
+  let list = allProducts;
+  if (q) list = list.filter(p => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+  if (catId) list = list.filter(p => String(p.category_id) === catId);
+  if (lowOnly) list = list.filter(p => p.total_stock <= p.reorder_point);
+  renderTable(list);
+}
+
+function renderTable(products) {
+  document.getElementById('product-count').textContent = `Products (${products.length})`;
+  const tbody = document.getElementById('productsTbody');
+  if (!products.length) {
+    tbody.innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="empty-icon">📦</div><p>No products found</p></div></td></tr>';
+    return;
+  }
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c.name]));
+  tbody.innerHTML = products.map(p => {
+    const stock = p.total_stock;
+    const stockStatus = stock === 0 ? 'danger' : stock <= p.reorder_point ? 'warning' : 'success';
+    const margin = p.cost_price > 0 ? (((p.selling_price - p.cost_price) / p.cost_price) * 100).toFixed(1) : 0;
+    return `<tr>
+      <td><span class="mono" style="color:var(--primary);font-weight:600">${p.sku}</span></td>
+      <td><strong>${p.name}</strong>${p.description ? `<br><small style="color:var(--text-muted)">${p.description.slice(0,50)}</small>` : ''}</td>
+      <td>${catMap[p.category_id] || '—'}</td>
+      <td>${p.unit}</td>
+      <td class="mono">${fmtCurrency(p.cost_price)}</td>
+      <td class="mono">${fmtCurrency(p.selling_price)} <small style="color:var(--success)">(+${margin}%)</small></td>
+      <td>${stockBar(stock, p.reorder_point, p.max_stock)}</td>
+      <td>${statusBadge(stock === 0 ? 'out_of_stock' : stock <= p.reorder_point ? 'low_stock' : 'healthy')}</td>
+      <td>
+        <div style="display:flex;gap:6px">
+          <button class="btn-secondary-custom btn-sm" onclick="editProduct(${p.id})">✏️ Edit</button>
+          <button class="btn-danger-custom btn-sm" onclick="deleteProduct(${p.id},'${p.name}')">🗑</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openAddModal() {
+  document.getElementById('modalTitle').textContent = 'Add Product';
+  document.getElementById('editId').value = '';
+  ['fSku','fName','fDesc','fBarcode'].forEach(id => document.getElementById(id).value = '');
+  ['fCost','fSell','fReorder','fMax'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('fUnit').value = 'piece';
+  document.getElementById('fCat').value = '';
+  document.getElementById('fSku').disabled = false;
+  openModal('productModal');
+}
+
+function editProduct(id) {
+  const p = allProducts.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('modalTitle').textContent = 'Edit Product';
+  document.getElementById('editId').value = id;
+  document.getElementById('fSku').value = p.sku; document.getElementById('fSku').disabled = true;
+  document.getElementById('fName').value = p.name;
+  document.getElementById('fDesc').value = p.description || '';
+  document.getElementById('fCat').value = p.category_id || '';
+  document.getElementById('fUnit').value = p.unit;
+  document.getElementById('fCost').value = p.cost_price;
+  document.getElementById('fSell').value = p.selling_price;
+  document.getElementById('fReorder').value = p.reorder_point;
+  document.getElementById('fMax').value = p.max_stock;
+  document.getElementById('fBarcode').value = p.barcode || '';
+  openModal('productModal');
+}
+
+async function saveProduct() {
+  const editId = document.getElementById('editId').value;
+  const body = {
+    sku: document.getElementById('fSku').value.trim(),
+    name: document.getElementById('fName').value.trim(),
+    description: document.getElementById('fDesc').value.trim(),
+    category_id: document.getElementById('fCat').value ? parseInt(document.getElementById('fCat').value) : null,
+    unit: document.getElementById('fUnit').value,
+    cost_price: parseFloat(document.getElementById('fCost').value) || 0,
+    selling_price: parseFloat(document.getElementById('fSell').value) || 0,
+    reorder_point: parseInt(document.getElementById('fReorder').value) || 10,
+    max_stock: parseInt(document.getElementById('fMax').value) || 500,
+    barcode: document.getElementById('fBarcode').value.trim()
+  };
+  if (!body.name || (!editId && !body.sku)) { toast('Name and SKU are required', 'error'); return; }
+  try {
+    if (editId) { await put(`/products/${editId}`, body); toast('Product updated'); }
+    else { await post('/products/', body); toast('Product created'); }
+    closeModal('productModal');
+    loadProducts();
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function deleteProduct(id, name) {
+  if (!confirm(`Deactivate "${name}"?`)) return;
+  try { await del(`/products/${id}`); toast('Product deactivated', 'warning'); loadProducts(); }
+  catch(e) { toast(e.message, 'error'); }
+}
+
+// Override openModal for products specifically
+document.querySelector('[onclick="openModal(\'productModal\')"]').onclick = openAddModal;
+
+loadCategories();
+loadProducts();
+</script>
+</body>
+</html>
